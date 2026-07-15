@@ -1,0 +1,30 @@
+# =========================================================
+# Holtz Nexus — container do PAINEL (SPA)
+#
+# Builda o frontend (Vite/React/TS) com Node 24 e serve os estáticos com um
+# nginx:alpine leve (fallback de SPA). O painel fala DIRETO com a API
+# (cross-origin, sem proxy) — a base da API é resolvida em runtime pelo próprio
+# painel (login/Configurações) ou fixada no build via VITE_API_URL.
+# =========================================================
+FROM node:24-alpine AS web-builder
+
+# Base da API embutida no build (opcional). Vazio => o painel usa o padrão
+# (http://127.0.0.1:3001) e permite sobrescrever no login/Configurações.
+ARG VITE_API_URL=""
+ENV VITE_API_URL=${VITE_API_URL}
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ ./
+RUN npm run build
+
+# =========================================================
+# Runtime — nginx:alpine servindo os estáticos
+# =========================================================
+FROM nginx:alpine AS runtime
+
+COPY --from=web-builder /web/dist /usr/share/nginx/html
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

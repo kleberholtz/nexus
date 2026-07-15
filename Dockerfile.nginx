@@ -1,0 +1,150 @@
+# =========================================================
+# Holtz Nexus — container do NGINX (reverse proxy / edge)
+#
+# Compila o nginx do zero (HTTP/3 + QUIC via QuicTLS, GeoIP2, brotli, zstd,
+# headers-more, stream, RTMP) e o empacota num runtime enxuto — SEM python. O
+# controle (reload/restart/test) é feito pela API, de outro container, via a
+# Docker Engine API (`docker exec`/lifecycle) — ver api/nginxctl.py.
+# =========================================================
+FROM ubuntu:26.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV GEOLITE_BASE_URL=https://r2.goholtz.com
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    ca-certificates \
+    wget \
+    curl \
+    git \
+    cmake \
+    ninja-build \
+    perl \
+    zlib1g-dev \
+    libpcre2-dev \
+    libmaxminddb-dev \
+    libzstd-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# ---------- QuicTLS (OpenSSL + QUIC) ----------
+RUN git clone --depth 1 --branch openssl-3.1.7+quic --single-branch \
+    https://github.com/quictls/openssl.git /build/quictls
+
+# ---------- Módulos adicionais ----------
+RUN git clone --depth 1 --branch v0.3.3 --single-branch \
+    https://github.com/vision5/ngx_devel_kit.git /build/ngx_devel_kit
+
+RUN git clone --depth 1 --single-branch \
+    https://github.com/leev/ngx_http_geoip2_module.git /build/ngx_http_geoip2_module
+
+RUN git clone --depth 1 --single-branch \
+    https://github.com/openresty/headers-more-nginx-module.git /build/headers-more-nginx-module
+
+# Brotli (libbrotli estática via submódulos)
+RUN git clone --depth 1 --recurse-submodules --shallow-submodules --single-branch \
+    https://github.com/google/ngx_brotli.git /build/ngx_brotli
+
+# ngx_brotli linka libs estáticas em deps/brotli/out — compilar antes
+# (-fPIC porque o nginx é linkado PIE)
+RUN cmake -S /build/ngx_brotli/deps/brotli \
+          -B /build/ngx_brotli/deps/brotli/out \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DCMAKE_C_FLAGS="-O2 -fPIC" \
+    && cmake --build /build/ngx_brotli/deps/brotli/out --config Release -j"$(nproc)"
+
+# Zstd (linka contra a libzstd do sistema)
+RUN git clone --depth 1 --single-branch \
+    https://github.com/tokers/zstd-nginx-module.git /build/zstd-nginx-module
+
+# RTMP (live streaming)
+RUN git clone --depth 1 --single-branch \
+    https://github.com/sergey-dryabzhinsky/nginx-rtmp-module.git /build/nginx-rtmp-module
+
+RUN mkdir -p /build/GeoIP2 \
+    && curl -fsSL ${GEOLITE_BASE_URL}/GeoLite2-Country.mmdb -o /build/GeoIP2/GeoLite2-Country.mmdb \
+    && curl -fsSL ${GEOLITE_BASE_URL}/GeoLite2-City.mmdb -o /build/GeoIP2/GeoLite2-City.mmdb \
+    && curl -fsSL ${GEOLITE_BASE_URL}/GeoLite2-ASN.mmdb -o /build/GeoIP2/GeoLite2-ASN.mmdb
+
+# ---------- NGINX (árvore local) — copiado por último p/ não invalidar o cache ----------
+COPY nginx/ /build/nginx
+WORKDIR /build/nginx
+
+RUN ./auto/configure \
+    --prefix=/etc/nginx \
+    --sbin-path=/usr/sbin/nginx \
+    --conf-path=/etc/nginx/nginx.conf \
+    --modules-path=/usr/lib/nginx/modules \
+    --error-log-path=/var/log/nginx/error.log \
+    --http-log-path=/var/log/nginx/access.log \
+    --pid-path=/var/run/nginx.pid \
+    --with-http_ssl_module \
+    --with-http_realip_module \
+    --with-http_stub_status_module \
+    --with-http_v2_module \
+    --with-http_v3_module \
+    --with-stream \
+    --with-stream_ssl_module \
+    --with-stream_ssl_preread_module \
+    --add-module=/build/ngx_devel_kit \
+    --add-module=/build/ngx_http_geoip2_module \
+    --add-module=/build/headers-more-nginx-module \
+    --add-module=/build/ngx_brotli \
+    --add-module=/build/zstd-nginx-module \
+    --add-module=/build/nginx-rtmp-module \
+    --with-threads \
+    --with-file-aio \
+    --with-openssl=/build/quictls \
+    --with-openssl-opt="no-tests" \
+    && make -j$(nproc) \
+    && make install \
+    && mkdir -p /usr/lib/nginx/modules
+
+# =========================================================
+# Runtime — só nginx + libs (sem python)
+# =========================================================
+FROM ubuntu:26.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    libmaxminddb0 \
+    libpcre2-8-0 \
+    zlib1g \
+    libzstd1 \
+    curl \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
+COPY --from=builder /etc/nginx /etc/nginx
+COPY --from=builder /usr/lib/nginx /usr/lib/nginx
+COPY --from=builder /build/GeoIP2 /usr/share/GeoIP2
+
+# Semente da config (árvore completa: nginx.conf + mime.types + nexus/ +
+# */-available//-enabled/ + internal/). No 1º boot o volume ./data/conf está
+# vazio; o entrypoint copia este template para /etc/nginx. A fonte da verdade
+# versionada fica em nginx/conf; `generated/` é criado em runtime pela API (tune).
+COPY nginx/conf /opt/nexus/seed
+
+RUN mkdir -p \
+    /var/cache/nginx/shared \
+    /var/cache/nginx/zones \
+    /var/cache/nginx/routes \
+    /var/log/nginx \
+    /var/log/nexus \
+    /etc/nginx/generated; \
+    chown -R www-data:www-data /var/cache/nginx; \
+    openssl dhparam -dsaparam -out /etc/ssl/dhparam.pem 1024
+
+COPY scripts/entrypoint.nginx.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 80
+EXPOSE 443/tcp
+EXPOSE 443/udp
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

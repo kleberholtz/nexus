@@ -1,0 +1,111 @@
+# Ambiente de DESENVOLVIMENTO com hot-reload — mesma topologia de 3 containers da
+# produção (nginx + api + web), mas a API roda com `uvicorn --reload` e o painel
+# pelo Vite/HMR.
+#
+# Fluxo:
+#   1) build das imagens base (uma vez; compila o nginx e monta a imagem da API):
+#        docker compose build
+#   2) subir o ambiente de dev:
+#        docker compose -f docker-compose.dev.yml up --build
+#
+# O que recarrega sozinho:
+#   - API (FastAPI): uvicorn --reload observando ./api  → http://localhost:3001
+#   - Painel (Vite/HMR): serviço `web` observando ./web → http://localhost:3000
+#   - nginx/conf/ montado rw: editar config + recarregar pela API/painel funciona (a API
+#     controla o nginx do outro container via o socket do Docker).
+services:
+  # --- nginx (edge) -------------------------------------------------------- #
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    image: kleberholtz/nexus:nginx
+    container_name: nexus-dev-nginx
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443/tcp"
+      - "443:443/udp"
+      - "1935:1935"
+    volumes:
+      - ./data/conf:/etc/nginx
+      - ./data/certs:/etc/certs
+      - ./data/logs/nginx:/var/log/nginx
+      - ./data/logs/api:/var/log/nexus
+      - ./data/apps:/var/www/apps
+    networks: [nexus]
+
+  # --- api (FastAPI, hot-reload) ------------------------------------------- #
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: kleberholtz/nexus:api
+    container_name: nexus-dev-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3001}:${API_PORT:-3001}/tcp"
+    environment:
+      API_PORT: "${API_PORT:-3001}"
+      # HTTP em dev (evita o prompt de cert self-signed na conexão direta).
+      API_TLS: "off"
+      API_TOKEN: "${API_TOKEN:-dev-token}"
+      API_USER: "${API_USER:-admin}"
+      API_PASSWORD: "${API_PASSWORD:-admin}"
+      API_CORS_ORIGINS: "*"
+      DB_TYPE: "sqlite"
+      # Controle do nginx via Docker + stub_status/logs na rede compartilhada.
+      NGINX_CONTAINER: "nexus-dev-nginx"
+      NGINX_STATUS_URL: "http://nexus-dev-nginx:8090/stub_status"
+      NGINX_ACCESS_LOG: "/var/log/nginx/access.log"
+      NGINX_ERROR_LOG: "/var/log/nexus/nginx.log"
+      # Força polling do watchfiles (uvicorn --reload) em bind mounts (WSL2/macOS).
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      # Código da API montado → uvicorn --reload recarrega ao salvar.
+      - ./api:/opt/api
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Estado unificado sob ./data (compartilhado com o nginx).
+      - ./data/conf:/etc/nginx
+      - ./data/certs:/etc/certs
+      - ./data/logs/nginx:/var/log/nginx
+      - ./data/logs/api:/var/log/nexus
+      - ./data/apps:/var/www/apps
+      - ./data/db:/var/lib/nexus
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${API_PORT:-3001}/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [nexus]
+
+  # --- web (Vite dev server / HMR) ----------------------------------------- #
+  web:
+    image: node:24-slim
+    container_name: nexus-dev-web
+    working_dir: /web
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port ${FRONT_PORT:-3000}"
+    restart: unless-stopped
+    ports:
+      - "${FRONT_PORT:-3000}:${FRONT_PORT:-3000}"
+    environment:
+      # O painel fala DIRETO com a API (no host, na porta API_PORT).
+      VITE_API_URL: "http://localhost:${API_PORT:-3001}"
+      FRONT_PORT: "${FRONT_PORT:-3000}"
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./web:/web
+      - web_node_modules:/web/node_modules
+    networks: [nexus]
+
+volumes:
+  # node_modules do Vite (cache; não sobrescrito pelo mount de ./web).
+  web_node_modules:
+
+networks:
+  nexus:
+    name: nexus

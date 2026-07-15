@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# =========================================================
+# Imagem de DESENVOLVIMENTO da API (hot-reload)
+# =========================================================
+# Parte da imagem da API (Dockerfile.api) e só troca o entrypoint para subir a
+# API com `uvicorn --reload`. Nada de `api/` é copiado aqui: o código é montado
+# como volume no docker-compose.dev.yml, então editar no host recarrega sozinho.
+# O nginx roda no serviço `nginx` (Dockerfile.nginx); o painel, no `web` (Vite).
+#
+# Pré-requisito: a imagem base da API precisa existir (build uma vez):
+#   docker compose build          # constrói nexus-nginx/api/web
+# Depois:
+#   docker compose -f docker-compose.dev.yml up --build
+FROM kleberholtz/nexus:api
+
+# A imagem base já traz uvicorn[standard] (watchfiles p/ --reload) via
+# requirements.txt — aqui só trocamos o entrypoint p/ o modo hot-reload.
+COPY scripts/entrypoint.dev.sh /usr/local/bin/entrypoint.dev.sh
+RUN chmod +x /usr/local/bin/entrypoint.dev.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.dev.sh"]
+# streama o log da API para o stdout do container (docker logs).
+CMD ["tail", "-n", "+1", "-F", "/var/log/nexus/api.log"]

@@ -1,0 +1,63 @@
+# Segredos / configuração local
+.env
+.env.*
+!.env.example
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+web/node_modules/
+dist/
+web/dist/
+dist-ssr/
+web/dist-ssr/
+.vite/
+web/.vite/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Arquivos gerados
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.sqlite
+*.sqlite3
+*.db
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+/Makefile
+/objs/
+/tmp/
+
+# Estado em runtime (bind mounts do docker-compose: config semeada, certs, logs,
+# banco, apps). Tudo unificado sob ./data — ver docker-compose.yml.
+/data/
+
+# IA
+.claude

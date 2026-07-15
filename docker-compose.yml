@@ -1,0 +1,106 @@
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    image: kleberholtz/nexus:nginx
+    container_name: nginx
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443/tcp"
+      - "443:443/udp"
+      - "1935:1935"
+    volumes:
+      # Todo o estado vive sob ./data (um único lugar). Mesmos caminhos no `api`.
+      - ./data/conf:/etc/nginx            # config (semeada no 1º boot; a API edita)
+      - ./data/certs:/etc/certs           # certificados (a API emite/renova)
+      - ./data/logs/nginx:/var/log/nginx  # access.log (lido pela API)
+      - ./data/logs/api:/var/log/nexus    # error nginx.log + logs de serviço
+      - ./data/apps:/var/www/apps         # releases dos deploys estáticos
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [nexus]
+
+  # API de gerenciamento (FastAPI). Edita a config (volumes compartilhados) e
+  # controla o nginx pela Docker Engine API (socket). No boot gera tuning/certs/
+  # ipv6 ANTES de o nginx subir (o nginx usa depends_on: api service_healthy).
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: kleberholtz/nexus:api
+    container_name: api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3001}:${API_PORT:-3001}/tcp"
+    environment:
+      API_PORT: "${API_PORT:-3001}"
+      # API_TLS: off (padrão) = HTTP; on = HTTPS self-signed.
+      API_TLS: "${API_TLS:-off}"
+      API_TOKEN: "${API_TOKEN:?API_TOKEN não definido no .env}"
+      API_USER: "${API_USER:?API_USER não definido no .env}"
+      API_PASSWORD: "${API_PASSWORD:?API_PASSWORD não definido no .env}"
+      API_NAME: "${API_NAME:-}"
+      API_EMAIL: "${API_EMAIL:-}"
+      SESSION_TTL_DAYS: "${SESSION_TTL_DAYS:-7}"
+      # API_CORS_ORIGINS: "https://painel.nexus.com"
+      # Controle do nginx via Docker: nome do container + stub_status na rede.
+      NGINX_CONTAINER: "nginx"
+      NGINX_STATUS_URL: "http://nginx:8090/stub_status"
+      NGINX_ACCESS_LOG: "/var/log/nginx/access.log"
+      NGINX_ERROR_LOG: "/var/log/nexus/nginx.log"
+      # Banco para métricas/auditoria. Padrão sqlite (volume `data`).
+      DB_TYPE: "${DB_TYPE:-sqlite}"
+      DB_USER: "${DB_USER:-}"
+      DB_PASS: "${DB_PASS:-}"
+      DB_HOST: "${DB_HOST:-}"
+      DB_PORT: "${DB_PORT:-}"
+      DB_NAME: "${DB_NAME:-nexus}"
+      DB_DSN: "${DB_DSN:-}"
+    volumes:
+      # Socket do Docker: a API controla o nginx (exec/reload) e provisiona os
+      # serviços de CI/CD. ATENÇÃO: acesso ao socket equivale a root no host.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/conf:/etc/nginx
+      - ./data/certs:/etc/certs
+      - ./data/logs/nginx:/var/log/nginx
+      - ./data/logs/api:/var/log/nexus
+      - ./data/apps:/var/www/apps
+      - ./data/db:/var/lib/nexus
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${API_PORT:-3001}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [nexus]
+
+  # Painel (SPA estático) servido por um nginx:alpine leve. Fala DIRETO com a API
+  # (cross-origin) — sem proxy. Desacoplado do nginx principal de propósito.
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_API_URL: "${VITE_API_URL:-}"
+    image: kleberholtz/nexus:web
+    container_name: web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONT_PORT:-3000}:80"
+    networks: [nexus]
+
+networks:
+  nexus:
+    name: nexus

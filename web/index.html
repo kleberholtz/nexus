@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Holtz Nexus</title>
+    <!-- Aplica tema/idioma salvos antes do render (evita flash de tema errado). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("nexus.theme");
+          if (t !== "dark" && t !== "light") // "auto" ou ausente → segue o SO
+            t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          document.documentElement.classList.add(t);
+          var l = localStorage.getItem("nexus.lang");
+          if (l !== "pt" && l !== "en")
+            l = (navigator.language || "").toLowerCase().indexOf("pt") === 0 ? "pt" : "en";
+          document.documentElement.lang = l === "pt" ? "pt-BR" : "en";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

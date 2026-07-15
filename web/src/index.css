@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes route-loading-progress {
+  0% { transform: scaleX(0.03); opacity: 0.7; }
+  12% { transform: scaleX(0.34); opacity: 1; }
+  45% { transform: scaleX(0.68); opacity: 1; }
+  75% { transform: scaleX(0.84); opacity: 1; }
+  100% { transform: scaleX(0.92); opacity: 1; }
+}
+
+.route-loading-bar {
+  transform-origin: left center;
+  animation: route-loading-progress 12s cubic-bezier(0.15, 0.7, 0.2, 1) forwards;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 260 15% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 260 15% 12%;
+    --primary: 265 80% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 25 95% 53%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 260 16% 95%;
+    --muted-foreground: 260 8% 42%;
+    --accent: 265 45% 95%;
+    --accent-foreground: 265 60% 32%;
+    --info: 190 90% 40%;
+    --info-foreground: 0 0% 100%;
+    --success: 142 66% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 42 96% 47%;
+    --warning-foreground: 40 90% 12%;
+    --destructive: 0 74% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 260 15% 90%;
+    --input: 260 15% 88%;
+    --ring: 265 80% 56%;
+    --radius: 0.65rem;
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 260 15% 14%;
+    --sidebar-primary: 265 80% 56%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 265 45% 94%;
+    --sidebar-accent-foreground: 265 60% 30%;
+    --sidebar-border: 260 15% 90%;
+    --sidebar-ring: 265 80% 56%;
+  }
+
+  .dark {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 96%;
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 96%;
+    --primary: 266 90% 66%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 25 95% 55%;
+    --secondary-foreground: 0 0% 8%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 62%;
+    --accent: 266 40% 16%;
+    --accent-foreground: 266 85% 82%;
+    --info: 190 92% 52%;
+    --info-foreground: 0 0% 8%;
+    --success: 142 70% 46%;
+    --success-foreground: 0 0% 8%;
+    --warning: 45 96% 56%;
+    --warning-foreground: 40 90% 10%;
+    --destructive: 0 82% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 16%;
+    --input: 0 0% 20%;
+    --ring: 266 90% 66%;
+    --sidebar: 0 0% 6%;
+    --sidebar-foreground: 0 0% 92%;
+    --sidebar-primary: 266 90% 66%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 266 40% 16%;
+    --sidebar-accent-foreground: 266 85% 82%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-ring: 266 90% 66%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Scrollbars temáticas (claro/escuro) em todos os elementos roláveis.
+     Firefox usa scrollbar-width/color; WebKit/Chromium usa ::-webkit-scrollbar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.35);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.6);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

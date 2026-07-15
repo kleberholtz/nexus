@@ -1,0 +1,53 @@
+# =========================================================
+# Holtz Nexus — container da API (gerência)
+#
+# FastAPI que lê/edita a config do nginx (volumes compartilhados) e o controla
+# via a Docker Engine API (socket montado) — reload/restart/test do container do
+# nginx (ver api/nginxctl.py, modo docker). No boot gera tuning/certs/ipv6 nos
+# volumes compartilhados ANTES de o nginx subir (compose: depends_on healthy).
+# SEM o binário do nginx: todo controle é remoto, pelo Docker.
+# =========================================================
+FROM ubuntu:26.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    iputils-ping \
+    git \
+    p7zip-full \
+    xz-utils \
+    zstd \
+    docker.io \
+    docker-compose-v2 \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dependências Python da API (fastapi/uvicorn/sqlalchemy/cryptography/drivers de
+# banco/etc.) — instaladas a partir do requirements.txt do pacote (fonte única).
+COPY api/requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+
+# Semente da config do nginx. No 1º boot o volume ./data/conf está vazio; o
+# entrypoint copia este template para /etc/nginx (a fonte da verdade versionada
+# fica em nginx/conf). Depois a API edita direto em /etc/nginx (= ./data/conf).
+COPY nginx/conf /opt/nexus/seed
+
+# Entrypoint: tuning + certs self-signed + ipv6 + cloudflared, depois a API.
+COPY scripts/entrypoint.api.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# API de gerenciamento (FastAPI). Importável como pacote `api` via PYTHONPATH.
+ENV PYTHONPATH=/opt
+COPY api /opt/api
+# Catálogo de templates (grupo CI/CD) — lido por api/templates.py (TEMPLATES_FILE).
+COPY templates.json /opt/templates.json
+
+EXPOSE 3001/tcp
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# O entrypoint sobe a API em background e executa o CMD. CMD padrão: streamar o
+# log da API para o stdout do container (docker logs) e manter o PID 1 vivo.
+CMD ["tail", "-n", "+1", "-F", "/var/log/nexus/api.log"]

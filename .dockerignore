@@ -1,0 +1,14 @@
+.claude
+
+**/__pycache__
+**/.git
+**/.github
+**/.gitignore
+**/*.pyc
+
+nginx/contrib
+misc
+web/dist
+web/node_modules
+# Estado em runtime (bind mounts do compose) — não faz parte do build.
+data
